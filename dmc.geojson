@@ -1,288 +1,1016 @@
-toGeoJSON = (function() {
-    'use strict';
-
-    var removeSpace = (/\s*/g),
-        trimSpace = (/^\s*|\s*$/g),
-        splitSpace = (/\s+/);
-    // generate a short, numeric hash of a string
-    function okhash(x) {
-        if (!x || !x.length) return 0;
-        for (var i = 0, h = 0; i < x.length; i++) {
-            h = ((h << 5) - h) + x.charCodeAt(i) | 0;
-        } return h;
-    }
-    // all Y children of X
-    function get(x, y) { return x.getElementsByTagName(y); }
-    function attr(x, y) { return x.getAttribute(y); }
-    function attrf(x, y) { return parseFloat(attr(x, y)); }
-    // one Y child of X, if any, otherwise null
-    function get1(x, y) { var n = get(x, y); return n.length ? n[0] : null; }
-    // https://developer.mozilla.org/en-US/docs/Web/API/Node.normalize
-    function norm(el) { if (el.normalize) { el.normalize(); } return el; }
-    // cast array x into numbers
-    function numarray(x) {
-        for (var j = 0, o = []; j < x.length; j++) o[j] = parseFloat(x[j]);
-        return o;
-    }
-    function clean(x) {
-        var o = {};
-        for (var i in x) if (x[i]) o[i] = x[i];
-        return o;
-    }
-    // get the content of a text node, if any
-    function nodeVal(x) {
-        if (x) { norm(x); }
-        return (x && x.firstChild && x.firstChild.nodeValue) || '';
-    }
-    // get one coordinate from a coordinate array, if any
-    function coord1(v) { return numarray(v.replace(removeSpace, '').split(',')); }
-    // get all coordinates from a coordinate array as [[],[]]
-    function coord(v) {
-        var coords = v.replace(trimSpace, '').split(splitSpace),
-            o = [];
-        for (var i = 0; i < coords.length; i++) {
-            o.push(coord1(coords[i]));
-        }
-        return o;
-    }
-    function coordPair(x) {
-        var ll = [attrf(x, 'lon'), attrf(x, 'lat')],
-            ele = get1(x, 'ele');
-        if (ele) ll.push(parseFloat(nodeVal(ele)));
-        return ll;
-    }
-
-    // create a new feature collection parent object
-    function fc() {
-        return {
-            type: 'FeatureCollection',
-            features: []
-        };
-    }
-
-    var serializer;
-    if (typeof XMLSerializer !== 'undefined') {
-        serializer = new XMLSerializer();
-    // only require xmldom in a node environment
-    } else if (typeof exports === 'object' && typeof process === 'object' && !process.browser) {
-        serializer = new (require('xmldom').XMLSerializer)();
-    }
-    function xml2str(str) { return serializer.serializeToString(str); }
-
-    var t = {
-        kml: function(doc, o) {
-            o = o || {};
-
-            var gj = fc(),
-                // styleindex keeps track of hashed styles in order to match features
-                styleIndex = {},
-                // atomic geospatial types supported by KML - MultiGeometry is
-                // handled separately
-                geotypes = ['Polygon', 'LineString', 'Point', 'Track'],
-                // all root placemarks in the file
-                placemarks = get(doc, 'Placemark'),
-                styles = get(doc, 'Style');
-
-            for (var k = 0; k < styles.length; k++) {
-                styleIndex['#' + attr(styles[k], 'id')] = okhash(xml2str(styles[k])).toString(16);
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.43962399999997,
+                    39.865171,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2015浦志强律师审判地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://ichef-1.bbci.co.uk/news/ws/660/amz/worldservice/live/assets/images/2015/12/14/151214053738_cn_cn_pu_zhiqiang_trial_05_976x549_ap_nocredit.jpg\" height=\"200\" width=\"auto\" /><br><br>浦志强律师审判地",
+                "gx_media_links": "http://ichef-1.bbci.co.uk/news/ws/660/amz/worldservice/live/assets/images/2015/12/14/151214053738_cn_cn_pu_zhiqiang_trial_05_976x549_ap_nocredit.jpg"
             }
-            for (var j = 0; j < placemarks.length; j++) {
-                gj.features = gj.features.concat(getPlacemark(placemarks[j]));
-            }
-            function kmlColor(v) {
-                var color, opacity;
-                v = v || "";
-                if (v.substr(0, 1) === "#") v = v.substr(1);
-                if (v.length === 6 || v.length === 3) color = v;
-                if (v.length === 8) {
-                    opacity = parseInt(v.substr(0, 2), 16) / 255;
-                    color = v.substr(2);
-                }
-                return [color, isNaN(opacity) ? undefined : opacity];
-            }
-            function gxCoord(v) { return numarray(v.split(' ')); }
-            function gxCoords(root) {
-                var elems = get(root, 'coord', 'gx'), coords = [];
-                for (var i = 0; i < elems.length; i++) coords.push(gxCoord(nodeVal(elems[i])));
-                return coords;
-            }
-            function getGeometry(root) {
-                var geomNode, geomNodes, i, j, k, geoms = [];
-                if (get1(root, 'MultiGeometry')) return getGeometry(get1(root, 'MultiGeometry'));
-                if (get1(root, 'MultiTrack')) return getGeometry(get1(root, 'MultiTrack'));
-                for (i = 0; i < geotypes.length; i++) {
-                    geomNodes = get(root, geotypes[i]);
-                    if (geomNodes) {
-                        for (j = 0; j < geomNodes.length; j++) {
-                            geomNode = geomNodes[j];
-                            if (geotypes[i] == 'Point') {
-                                geoms.push({
-                                    type: 'Point',
-                                    coordinates: coord1(nodeVal(get1(geomNode, 'coordinates')))
-                                });
-                            } else if (geotypes[i] == 'LineString') {
-                                geoms.push({
-                                    type: 'LineString',
-                                    coordinates: coord(nodeVal(get1(geomNode, 'coordinates')))
-                                });
-                            } else if (geotypes[i] == 'Polygon') {
-                                var rings = get(geomNode, 'LinearRing'),
-                                    coords = [];
-                                for (k = 0; k < rings.length; k++) {
-                                    coords.push(coord(nodeVal(get1(rings[k], 'coordinates'))));
-                                }
-                                geoms.push({
-                                    type: 'Polygon',
-                                    coordinates: coords
-                                });
-                            } else if (geotypes[i] == 'Track') {
-                                geoms.push({
-                                    type: 'LineString',
-                                    coordinates: gxCoords(geomNode)
-                                });
-                            }
-                        }
-                    }
-                }
-                return geoms;
-            }
-            function getPlacemark(root) {
-                var geoms = getGeometry(root), i, properties = {},
-                    name = nodeVal(get1(root, 'name')),
-                    styleUrl = nodeVal(get1(root, 'styleUrl')),
-                    description = nodeVal(get1(root, 'description')),
-                    timeSpan = get1(root, 'TimeSpan'),
-                    extendedData = get1(root, 'ExtendedData'),
-                    lineStyle = get1(root, 'LineStyle'),
-                    polyStyle = get1(root, 'PolyStyle');
-
-                if (!geoms.length) return [];
-                if (name) properties.name = name;
-                if (styleUrl && styleIndex[styleUrl]) {
-                    properties.styleUrl = styleUrl;
-                    properties.styleHash = styleIndex[styleUrl];
-                }
-                if (description) properties.description = description;
-                if (timeSpan) {
-                    var begin = nodeVal(get1(timeSpan, 'begin'));
-                    var end = nodeVal(get1(timeSpan, 'end'));
-                    properties.timespan = { begin: begin, end: end };
-                }
-                if (lineStyle) {
-                    var linestyles = kmlColor(nodeVal(get1(lineStyle, 'color'))),
-                        color = linestyles[0],
-                        opacity = linestyles[1],
-                        width = parseFloat(nodeVal(get1(lineStyle, 'width')));
-                    if (color) properties.stroke = color;
-                    if (!isNaN(opacity)) properties['stroke-opacity'] = opacity;
-                    if (!isNaN(width)) properties['stroke-width'] = width;
-                }
-                if (polyStyle) {
-                    var polystyles = kmlColor(nodeVal(get1(polyStyle, 'color'))),
-                        pcolor = polystyles[0],
-                        popacity = polystyles[1],
-                        fill = nodeVal(get1(polyStyle, 'fill')),
-                        outline = nodeVal(get1(polyStyle, 'outline'));
-                    if (pcolor) properties.fill = pcolor;
-                    if (!isNaN(popacity)) properties['fill-opacity'] = popacity;
-                    if (fill) properties['fill-opacity'] = fill === "1" ? 1 : 0;
-                    if (outline) properties['stroke-opacity'] = outline === "1" ? 1 : 0;
-                }
-                if (extendedData) {
-                    var datas = get(extendedData, 'Data'),
-                        simpleDatas = get(extendedData, 'SimpleData');
-
-                    for (i = 0; i < datas.length; i++) {
-                        properties[datas[i].getAttribute('name')] = nodeVal(get1(datas[i], 'value'));
-                    }
-                    for (i = 0; i < simpleDatas.length; i++) {
-                        properties[simpleDatas[i].getAttribute('name')] = nodeVal(simpleDatas[i]);
-                    }
-                }
-                return [{
-                    type: 'Feature',
-                    geometry: (geoms.length === 1) ? geoms[0] : {
-                        type: 'GeometryCollection',
-                        geometries: geoms
-                    },
-                    properties: properties
-                }];
-            }
-            return gj;
         },
-        gpx: function(doc, o) {
-            var i,
-                tracks = get(doc, 'trk'),
-                routes = get(doc, 'rte'),
-                waypoints = get(doc, 'wpt'),
-                // a feature collection
-                gj = fc();
-            for (i = 0; i < tracks.length; i++) {
-                gj.features.push(getTrack(tracks[i]));
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.22909600000004,
+                    39.90665000000001,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2009诺奖得主刘晓波审判地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://www.bbc.com/staticarchive/bb26e807c080e2d5f17e171a112cabb2dcb5d49b.jpg\" height=\"200\" width=\"auto\" /><br><br>诺奖得主刘晓波审判地",
+                "gx_media_links": "http://www.bbc.com/staticarchive/bb26e807c080e2d5f17e171a112cabb2dcb5d49b.jpg"
             }
-            for (i = 0; i < routes.length; i++) {
-                gj.features.push(getRoute(routes[i]));
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    113.33666189999997,
+                    23.1357337,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2015郭飞雄审判地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://www.renminbao.com/rmb/article_images/2014/12/05/a511305.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://www.renminbao.com/rmb/article_images/2014/12/05/a511305.jpg"
             }
-            for (i = 0; i < waypoints.length; i++) {
-                gj.features.push(getPoint(waypoints[i]));
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.46408670000004,
+                    40.02058639999999,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2015高瑜审判地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"https://cdn.thestandnews.com/media/photos/cache/8181D20A-4806-44DB-A37D-1F9DB55D1479_mw1024_s_n_cRF9k_1200x0.png\" height=\"200\" width=\"auto\" /><br><br>高瑜审判地",
+                "gx_media_links": "https://cdn.thestandnews.com/media/photos/cache/8181D20A-4806-44DB-A37D-1F9DB55D1479_mw1024_s_n_cRF9k_1200x0.png"
             }
-            function getPoints(node, pointname) {
-                var pts = get(node, pointname), line = [];
-                for (var i = 0; i < pts.length; i++) {
-                    line.push(coordPair(pts[i]));
-                }
-                return line;
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.07343600000003,
+                    28.173375,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2010钱云会案事发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://img.epochtimes.com/i6/1012300743282343.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://img.epochtimes.com/i6/1012300743282343.jpg"
             }
-            function getTrack(node) {
-                var segments = get(node, 'trkseg'), track = [];
-                for (var i = 0; i < segments.length; i++) {
-                    track.push(getPoints(segments[i], 'trkpt'));
-                }
-                return {
-                    type: 'Feature',
-                    properties: getProperties(node),
-                    geometry: {
-                        type: track.length === 1 ? 'LineString' : 'MultiLineString',
-                        coordinates: track.length === 1 ? track[0] : track
-                    }
-                };
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.31471799999997,
+                    31.381337000000002,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2011艾未未上海工作室被拆地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://img.epochtimes.com/i6/110112012840941_1.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://img.epochtimes.com/i6/110112012840941_1.jpg"
             }
-            function getRoute(node) {
-                return {
-                    type: 'Feature',
-                    properties: getProperties(node),
-                    geometry: {
-                        type: 'LineString',
-                        coordinates: getPoints(node, 'rtept')
-                    }
-                };
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    118.19599399999994,
+                    35.512834,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "盲人维权律师陈光诚老家",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"https://lh3.googleusercontent.com/-WrtVz2hw58o/VYhboLvLwsI/AAAAAAAAAeo/SbghOqBoMjs/w506-h281/china-chen-guangcheng-27.04.12.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "https://lh3.googleusercontent.com/-WrtVz2hw58o/VYhboLvLwsI/AAAAAAAAAeo/SbghOqBoMjs/w506-h281/china-chen-guangcheng-27.04.12.jpg"
             }
-            function getPoint(node) {
-                var prop = getProperties(node);
-                prop.sym = nodeVal(get1(node, 'sym'));
-                return {
-                    type: 'Feature',
-                    properties: prop,
-                    geometry: {
-                        type: 'Point',
-                        coordinates: coordPair(node)
-                    }
-                };
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.44001300000004,
+                    31.235421000000002,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "20101115上海高楼大火事发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://photocdn.sohu.com/20101122/Img277802756.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://photocdn.sohu.com/20101122/Img277802756.jpg"
             }
-            function getProperties(node) {
-                var meta = ['name', 'desc', 'author', 'copyright', 'link',
-                            'time', 'keywords'],
-                    prop = {},
-                    k;
-                for (k = 0; k < meta.length; k++) {
-                    prop[meta[k]] = nodeVal(get1(node, meta[k]));
-                }
-                return clean(prop);
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    117.75413490000004,
+                    39.0692167,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "20150812天津大爆炸事发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://ichef.bbci.co.uk/news/ws/624/amz/worldservice/live/assets/images/2015/08/16/150816021943_cn_tianjin_explosion_aug15_01_976x549_xinhua.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://ichef.bbci.co.uk/news/ws/624/amz/worldservice/live/assets/images/2015/08/16/150816021943_cn_tianjin_explosion_aug15_01_976x549_xinhua.jpg"
             }
-            return gj;
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    110.33872700000006,
+                    31.04267200000001,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2009邓玉娇案一审法院",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://www.zyzw.com/shxz/dyja001.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://www.zyzw.com/shxz/dyja001.jpg"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    111.62290729999995,
+                    26.237047200000003,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012唐慧劳教案一审法院",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.43637100000001,
+                    39.923462,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "外交部发言人工作地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.46625799999991,
+                    39.95435200000001,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2011中国PM2.5发源地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://www.sinovision.net/attachments/2009/02/13/2081415194499567383dccc.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://www.sinovision.net/attachments/2009/02/13/2081415194499567383dccc.jpg"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.46423099999991,
+                    39.915275,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2009CCTV大火事发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://s4.sinaimg.cn/bmiddle/47147e9eg71f720d3d103&690\" height=\"200\" width=\"auto\" /><br><br>芮成钢叶迎春贾晓烨蒋梅等工作地",
+                "gx_media_links": "http://s4.sinaimg.cn/bmiddle/47147e9eg71f720d3d103&690"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    113.93543299999999,
+                    22.719555,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2015深圳堆土滑坡事故事发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://ichef.bbci.co.uk/news/ws/660/amz/worldservice/live/assets/images/2015/12/21/151221041538_cn_guangming_collapse_06_976x782_xinhua_nocredit.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://ichef.bbci.co.uk/news/ws/660/amz/worldservice/live/assets/images/2015/12/21/151221041538_cn_guangming_collapse_06_976x782_xinhua_nocredit.jpg"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    113.244903,
+                    23.274816,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2003孙志刚事件案发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://img1.qq.com/news/pics/6410/6410529.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://img1.qq.com/news/pics/6410/6410529.jpg"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    114.45720099999994,
+                    38.0860845,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "1994聂树斌案一审法院",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    111.70713599999999,
+                    40.787852,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "1996呼格吉勒图案一审法院",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    115.51710409999998,
+                    38.870798,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2010我爸是李刚事件事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.35690629999999,
+                    39.93870409999999,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2010李鸿忠抢录音笔处",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    104.06838800000003,
+                    30.6247,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012王立军叛逃美国领事馆处",
+                "styleUrl": "#icon-962-DB4436-nodesc",
+                "styleHash": "-5deeb4eb"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.55162999999993,
+                    29.565195999999997,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012薄熙来打王立军耳光处",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.60977000000003,
+                    29.551894,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2011薄谷开来杀人处",
+                "styleUrl": "#icon-962-DB4436-nodesc",
+                "styleHash": "-5deeb4eb"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    112.40440899999999,
+                    29.72689,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2009石首抢尸事件事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    115.05292400000008,
+                    35.771954,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "谷俊山家乡豪宅所在地",
+                "styleUrl": "#icon-962-4186F0-nodesc",
+                "styleHash": "7df7d89d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.50564600000007,
+                    31.570653999999998,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "周永康家乡",
+                "styleUrl": "#icon-962-4186F0-nodesc",
+                "styleHash": "7df7d89d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.43760099999996,
+                    39.83158099999999,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "北京安元鼎保安公司",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    108.40141599999993,
+                    34.425723,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "郭伯雄家乡",
+                "styleUrl": "#icon-962-4186F0-nodesc",
+                "styleHash": "7df7d89d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    126.5253996,
+                    45.7740214,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012哈尔滨阳明滩大桥垮塌事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    108.95423900000003,
+                    34.265478,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012表叔杨达才工作地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.39561200000003,
+                    29.805107999999997,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012雷政富工作地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    118.84969699999998,
+                    31.94728120000001,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2008天价烟周久耕工作地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.10049600000002,
+                    41.070699,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2009诺奖得主刘晓波关押地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    113.31515200000001,
+                    23.124127,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2004南都事件事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.4558101,
+                    31.2565967,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2007杨佳事件始发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.46411000000002,
+                    31.244317,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2008杨佳杀警处",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    115.95760300000008,
+                    39.600547,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2008杨佳母亲被精神病处",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.40887799999994,
+                    39.919232,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "赵紫阳软禁地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    105.391798,
+                    27.362875,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2015毕节自杀留守儿童的家",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.33321199999999,
+                    39.9860324,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2012令计划儿子车祸发生处",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    111.94382900000005,
+                    34.749287,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2013鞭炮炸断大桥处",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    103.49146399999995,
+                    31.057488,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2008映秀中学豆腐渣校舍",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.59360860000001,
+                    28.0088096,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2011温州动车事故事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    140.3847465,
+                    35.7653272,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2009冯正虎滞留成田机场事件",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    123.25708499999996,
+                    41.89919,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2013馬三家女子勞教所酷刑事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.2149504,
+                    36.0493288,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "青岛黄岛输油管爆炸事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    116.22990940000001,
+                    39.9064222,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2014许志永审判事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.14089700000001,
+                    38.807412,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2010大连输油管爆炸事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    117.622531,
+                    23.83067,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "漳州古雷px项目爆炸事发地",
+                "styleUrl": "#icon-503-DB4436",
+                "styleHash": "-12a4d528",
+                "description": "<img src=\"http://www.cityjs.com/uploadfile/2015/0407/20150407094518438.jpg\" height=\"200\" width=\"auto\" /><br><br>",
+                "gx_media_links": "http://www.cityjs.com/uploadfile/2015/0407/20150407094518438.jpg"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    121.49051499999995,
+                    31.238993000000004,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "2014上海外滩陈毅广场踩踏事故",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    112.9356766,
+                    29.761844099999998,
+                    0
+                ]
+            },
+            "properties": {
+                "name": "东方之星沉船事发地",
+                "styleUrl": "#icon-503-DB4436-nodesc",
+                "styleHash": "-3b37c65d"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [
+                            114.70577879927711,
+                            42.254080309089844,
+                            0
+                        ],
+                        [
+                            113.11523440000002,
+                            42.09822239999999,
+                            0
+                        ],
+                        [
+                            109.4238281,
+                            39.9771201,
+                            0
+                        ],
+                        [
+                            102.4804688,
+                            38.685509800000005,
+                            0
+                        ],
+                        [
+                            96.8554688,
+                            40.31304320000001,
+                            0
+                        ],
+                        [
+                            93.9550781,
+                            38.203655299999994,
+                            0
+                        ],
+                        [
+                            95.8007813,
+                            33.4314413,
+                            0
+                        ],
+                        [
+                            98.7011719,
+                            31.128199299999995,
+                            0
+                        ],
+                        [
+                            105.38085940000002,
+                            24.046464,
+                            0
+                        ],
+                        [
+                            110.9179688,
+                            23.7250117,
+                            0
+                        ],
+                        [
+                            116.01562500000001,
+                            23.4027649,
+                            0
+                        ],
+                        [
+                            118.3886719,
+                            25.0059727,
+                            0
+                        ],
+                        [
+                            121.02539060000001,
+                            29.6116701,
+                            0
+                        ],
+                        [
+                            122.8710938,
+                            32.1756125,
+                            0
+                        ],
+                        [
+                            121.11328129999998,
+                            33.9433599,
+                            0
+                        ],
+                        [
+                            119.61914059999998,
+                            35.38905,
+                            0
+                        ],
+                        [
+                            121.4648438,
+                            37.0200982,
+                            0
+                        ],
+                        [
+                            118.3886719,
+                            36.9498918,
+                            0
+                        ],
+                        [
+                            118.03710939999999,
+                            38.3416562,
+                            0
+                        ],
+                        [
+                            116.27929690000002,
+                            38.6855098,
+                            0
+                        ],
+                        [
+                            119.0917969,
+                            40.245991499999995,
+                            0
+                        ],
+                        [
+                            120.522760434647,
+                            40.742513468495474,
+                            0
+                        ],
+                        [
+                            122.2558594,
+                            41.3108239,
+                            0
+                        ],
+                        [
+                            127.88085940000002,
+                            41.9676592,
+                            0
+                        ],
+                        [
+                            127.30957030000002,
+                            45.9511497,
+                            0
+                        ],
+                        [
+                            124.4091797,
+                            45.1510533,
+                            0
+                        ],
+                        [
+                            121.3330078,
+                            44.5904672,
+                            0
+                        ],
+                        [
+                            120.7617188,
+                            44.465151,
+                            0
+                        ],
+                        [
+                            118.828125,
+                            42.5530803,
+                            0
+                        ],
+                        [
+                            114.70577879927711,
+                            42.254080309089844,
+                            0
+                        ]
+                    ]
+                ]
+            },
+            "properties": {
+                "name": "霧霾",
+                "description": "<img src=\"http://cdn.citylab.com/media/img/citylab/legacy/2013/01/14/china%20smog%202013%20FL8%20biz%20distr.JPG\" height=\"200\" width=\"auto\" /><br><br>http://berkeleyearth.org/air-pollution-overview/<br><br><img src=\"http://static.guim.co.uk/sys-images/Guardian/Pix/pictures/2013/12/10/1386679419690/Smog-in-Lianyungang-008.jpg\" height=\"200\" width=\"auto\" />",
+                "gx_media_links": "http://cdn.citylab.com/media/img/citylab/legacy/2013/01/14/china%20smog%202013%20FL8%20biz%20distr.JPG http://static.guim.co.uk/sys-images/Guardian/Pix/pictures/2013/12/10/1386679419690/Smog-in-Lianyungang-008.jpg"
+            }
         }
-    };
-    return t;
-})();
-
-if (typeof module !== 'undefined') module.exports = toGeoJSON;
+    ]
+}
